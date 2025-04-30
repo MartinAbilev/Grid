@@ -2,19 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>8x8 Unique Grid Generator with Meta-Grid Face (FNV-1a Hashing and Single Pixel Search)</title>
+    <title>8x8 Unique Grid Generator with Editors</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
     <style>
         body { display: flex; flex-direction: column; align-items: center; font-family: Arial, sans-serif; margin: 0; }
+        .main-container { display: flex; align-items: flex-start; justify-content: center; margin-top: 10px; }
+        .editor-container { display: flex; flex-direction: column; align-items: center; margin: 0 20px; }
+        .editor-canvas { width: 80px; height: 80px; border: 1px solid black; }
         .canvas-container {
             width: 780px;
             height: 780px;
             overflow: hidden;
             border: 1px solid black;
-            margin-top: 10px;
         }
         input { margin: 10px; padding: 5px; }
-        #speed { width: 80px; } /* Added to set smaller width for speed input */
+        #speed { width: 80px; }
         button { padding: 5px 10px; margin: 5px; }
         .small-button { padding: 2px 5px; font-size: 12px; }
         .controls { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; }
@@ -39,7 +41,17 @@
     <div>
         <span class="label" id="indexLabel">Showing grids 1 to 64</span>
     </div>
-    <div class="canvas-container" id="canvasContainer"></div>
+    <div class="main-container">
+        <div class="editor-container">
+            <div id="leftEditor" class="editor-canvas"></div>
+            <button onclick="createBigGrid()">Create Big Grid</button>
+        </div>
+        <div class="canvas-container" id="canvasContainer"></div>
+        <div class="editor-container">
+            <div id="rightEditor" class="editor-canvas"></div>
+            <label><input type="checkbox" id="searchRight"> Search for this pattern</label>
+        </div>
+    </div>
     <script>
         let grids = [];
         const cellSize = 10;
@@ -49,7 +61,7 @@
         const visibleRows = 8;
         const bufferRows = 2;
         const totalRows = visibleRows + bufferRows * 2;
-        const batchSize = totalRows * gridsPerRow; // 12 * 8 = 96 grids
+        const batchSize = totalRows * gridsPerRow;
         let startIndex = 1;
         let scrollOffset = 0;
         let playInterval = null;
@@ -58,8 +70,13 @@
         let lastCheckIndex = 1;
         let borderOpacity = 0;
         let borderFadeIndex = null;
-        const gridHeight = gridSize * cellSize + spacing; // 95px
+        const gridHeight = gridSize * cellSize + spacing;
         let alertedIndices = {};
+
+        // Editor grids
+        let leftEditorGrid;
+        let rightEditorGrid;
+        let leftEditorIndex = null;
 
         const heartPattern = [
             [0, 1, 1, 0, 0, 1, 1, 0],
@@ -106,19 +123,56 @@
         ];
 
         const singlePixelPattern = Array(8).fill().map(() => Array(8).fill(0));
-        singlePixelPattern[3][3] = 1; // Center pixel at row=3, col=3 (0-based indexing)
+        singlePixelPattern[3][3] = 1;
+
+        const uniquePattern = [
+            [1, 1, 1, 1, 1, 1, 0, 0],
+            [1, 0, 0, 1, 1, 1, 0, 0],
+            [1, 0, 0, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 0, 0, 1, 1],
+            [1, 1, 1, 1, 0, 0, 1, 1],
+            [1, 0, 0, 0, 0, 0, 1, 1],
+            [1, 0, 0, 0, 0, 0, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1]
+        ];
 
         function setLocalStorage(name, value) {
-            localStorage.setItem(name, value);
+            localStorage.setItem(name, JSON.stringify(value));
         }
 
         function getLocalStorage(name) {
-            return localStorage.getItem(name);
+            const value = localStorage.getItem(name);
+            return value ? JSON.parse(value) : null;
         }
 
         function generatePattern(index, seed) {
             if (index === 1000) return monaLisaPattern;
             if (index === 2000) return facePattern;
+
+            // Check if the index is part of a saved big grid
+            const bigGrid = getLocalStorage('bigGrid');
+            if (bigGrid && bigGrid.startIndex <= index && index < bigGrid.startIndex + 64) {
+                const metaIndex = index - bigGrid.startIndex;
+                const metaRow = Math.floor(metaIndex / 8);
+                const metaCol = metaIndex % 8;
+                const metaValue = bigGrid.pattern[metaRow][metaCol];
+                let grid = [];
+                for (let row = 0; row < gridSize; row++) {
+                    let rowData = [];
+                    for (let col = 0; col < gridSize; col++) {
+                        let hash = 0xCBF29CE484222325n;
+                        const prime = 0x100000001B3n;
+                        hash ^= BigInt(index); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                        hash ^= BigInt(row + index); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                        hash ^= BigInt(col + index); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                        hash ^= BigInt(seed); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                        let pixel = (hash % 100n) < (metaValue === 1 ? 75n : 25n) ? 1 : 0;
+                        rowData.push(pixel);
+                    }
+                    grid.push(rowData);
+                }
+                return grid;
+            }
 
             if (index >= 2001 && index <= 2064) {
                 let metaIndex = index - 2001;
@@ -174,7 +228,143 @@
             return true;
         }
 
+        // Left Editor Setup
+        const leftEditorSketch = (p) => {
+            p.setup = () => {
+                let canvas = p.createCanvas(80, 80);
+                canvas.parent('leftEditor');
+                p.drawGrid();
+            };
+
+            p.draw = () => {
+                p.drawGrid();
+            };
+
+            p.drawGrid = () => {
+                p.background(255);
+                p.stroke(0);
+                p.strokeWeight(1);
+                p.noFill();
+                p.rect(0, 0, gridSize * cellSize, gridSize * cellSize);
+
+                for (let row = 0; row < gridSize; row++) {
+                    for (let col = 0; col < gridSize; col++) {
+                        p.noStroke();
+                        p.fill(leftEditorGrid[row][col] ? 0 : 255);
+                        p.square(col * cellSize, row * cellSize, cellSize);
+                    }
+                }
+            };
+
+            p.mousePressed = () => {
+                let x = Math.floor(p.mouseX / cellSize);
+                let y = Math.floor(p.mouseY / cellSize);
+                if (x >= 0 && x < gridSize && y >= 0 && y < gridSize) {
+                    leftEditorGrid[y][x] = leftEditorGrid[y][x] === 1 ? 0 : 1;
+                    setLocalStorage('leftEditorGrid', leftEditorGrid);
+
+                    // Update the selected grid in the main canvas if leftEditorIndex is within the current batch
+                    if (leftEditorIndex !== null) {
+                        const gridIndex = leftEditorIndex - startIndex;
+                        if (gridIndex >= 0 && gridIndex < grids.length) {
+                            grids[gridIndex] = JSON.parse(JSON.stringify(leftEditorGrid));
+                        }
+                    }
+
+                    p.drawGrid();
+                }
+            };
+        };
+
+        // Right Editor Setup
+        const rightEditorSketch = (p) => {
+            p.setup = () => {
+                let canvas = p.createCanvas(80, 80);
+                canvas.parent('rightEditor');
+                p.drawGrid();
+            };
+
+            p.draw = () => {
+                p.drawGrid();
+            };
+
+            p.drawGrid = () => {
+                p.background(255);
+                p.stroke(0);
+                p.strokeWeight(1);
+                p.noFill();
+                p.rect(0, 0, gridSize * cellSize, gridSize * cellSize);
+
+                for (let row = 0; row < gridSize; row++) {
+                    for (let col = 0; col < gridSize; col++) {
+                        p.noStroke();
+                        p.fill(rightEditorGrid[row][col] ? 0 : 255);
+                        p.square(col * cellSize, row * cellSize, cellSize);
+                    }
+                }
+            };
+
+            p.mousePressed = () => {
+                let x = Math.floor(p.mouseX / cellSize);
+                let y = Math.floor(p.mouseY / cellSize);
+                if (x >= 0 && x < gridSize && y >= 0 && y < gridSize) {
+                    rightEditorGrid[y][x] = rightEditorGrid[y][x] === 1 ? 0 : 1;
+                    p.drawGrid();
+                }
+            };
+        };
+
+        function createBigGrid() {
+            if (leftEditorIndex === null) {
+                alert("Please select a grid in the main canvas first!");
+                return;
+            }
+
+            // Calculate the selected row relative to startIndex
+            const selectedRow = Math.floor((leftEditorIndex - startIndex) / gridsPerRow);
+            const metaStartIndex = startIndex + selectedRow * gridsPerRow; // First column of the selected row
+
+            // Use the current leftEditorGrid as the pattern for the big grid
+            const patternToUse = JSON.parse(JSON.stringify(leftEditorGrid));
+
+            // Save the big grid to localStorage
+            setLocalStorage('bigGrid', {
+                startIndex: metaStartIndex,
+                pattern: patternToUse
+            });
+
+            // Regenerate grids to reflect the new big grid, preserving scrollOffset and leftEditorIndex
+            const currentScrollOffset = scrollOffset;
+            const currentLeftEditorIndex = leftEditorIndex;
+
+            generateGrids();
+
+            // Restore scrollOffset and leftEditorIndex
+            scrollOffset = currentScrollOffset;
+            leftEditorIndex = currentLeftEditorIndex;
+            setLocalStorage('leftEditorIndex', leftEditorIndex);
+
+            // Ensure the selected grid in the current batch reflects leftEditorGrid
+            const gridIndex = leftEditorIndex - startIndex;
+            if (gridIndex >= 0 && gridIndex < grids.length) {
+                grids[gridIndex] = JSON.parse(JSON.stringify(leftEditorGrid));
+            }
+
+            alert(`Big grid created starting at index ${metaStartIndex}!`);
+        }
+
+        // Main Canvas Setup
         function setup() {
+            // Initialize editor grids
+            leftEditorGrid = getLocalStorage('leftEditorGrid') || JSON.parse(JSON.stringify(uniquePattern));
+            rightEditorGrid = Array(8).fill().map(() => Array(8).fill(0));
+            leftEditorIndex = getLocalStorage('leftEditorIndex') || null;
+
+            // Setup editors
+            new p5(leftEditorSketch);
+            new p5(rightEditorSketch);
+
+            // Setup main canvas
             let savedIndex = getLocalStorage("lastCheckIndex");
             if (savedIndex) {
                 lastCheckIndex = parseInt(savedIndex);
@@ -193,6 +383,10 @@
 
             for (let i = startIndex; i < startIndex + batchSize; i++) {
                 let grid = generatePattern(i, seed);
+                // If this index matches leftEditorIndex, override with leftEditorGrid
+                if (i === leftEditorIndex) {
+                    grid = JSON.parse(JSON.stringify(leftEditorGrid));
+                }
                 grids.push(grid);
             }
 
@@ -254,6 +448,27 @@
             return false;
         }
 
+        function mousePressed() {
+            let x = mouseX;
+            let y = mouseY + scrollOffset;
+            let gridCol = Math.floor(x / (gridSize * cellSize + spacing));
+            let gridRow = Math.floor(y / (gridSize * cellSize + spacing));
+            let gridIndex = gridRow * gridsPerRow + gridCol;
+
+            if (gridIndex >= 0 && gridIndex < grids.length) {
+                let actualIndex = startIndex + gridIndex;
+                let grid = grids[gridIndex];
+
+                // Update the left editor to show the selected grid's pattern
+                leftEditorGrid = JSON.parse(JSON.stringify(grid));
+                leftEditorIndex = actualIndex;
+
+                // Save to localStorage
+                setLocalStorage('leftEditorGrid', leftEditorGrid);
+                setLocalStorage('leftEditorIndex', leftEditorIndex);
+            }
+        }
+
         function playGrids() {
             if (playInterval || searchInterval) return;
             let speed = parseInt(document.getElementById('speed').value) || 50;
@@ -271,7 +486,7 @@
             if (searchInterval || playInterval) return;
             let seed = parseInt(document.getElementById('seed').value) || 42;
             let speed = parseInt(document.getElementById('speed').value) || 50;
-            const searchLimit = Math.pow(2, 24); // Increased to 2^24 = 16,777,216
+            const searchLimit = Math.pow(2, 24);
 
             let firstVisibleIndex = startIndex + Math.floor(scrollOffset / gridHeight) * gridsPerRow;
             if (lastCheckIndex < firstVisibleIndex) {
@@ -295,6 +510,12 @@
 
                 let grid = generatePattern(checkIndex, seed);
 
+                if (document.getElementById('searchRight').checked && gridsMatch(grid, rightEditorGrid)) {
+                    alert(`Right editor pattern found at grid number ${checkIndex}!`);
+                    setLocalStorage("lastCheckIndex", checkIndex);
+                    stopSearch();
+                    return;
+                }
                 if (gridsMatch(grid, singlePixelPattern)) {
                     alert(`Single pixel in center found at grid number ${checkIndex}!`);
                     setLocalStorage("lastCheckIndex", checkIndex);
@@ -321,6 +542,12 @@
                 }
                 if (gridsMatch(grid, facePattern)) {
                     alert(`Your face found at grid number ${checkIndex}!`);
+                    setLocalStorage("lastCheckIndex", checkIndex);
+                    stopSearch();
+                    return;
+                }
+                if (gridsMatch(grid, uniquePattern)) {
+                    alert(`Unique pattern found at grid number ${checkIndex}!`);
                     setLocalStorage("lastCheckIndex", checkIndex);
                     stopSearch();
                     return;
@@ -397,11 +624,21 @@
 
                 let roundedY = Math.round(y);
                 if (roundedY + gridSize * cellSize >= 0 && roundedY < 780) {
+                    // Draw the grid
                     stroke(0);
                     strokeWeight(1);
                     noFill();
                     rect(x, roundedY, gridSize * cellSize, gridSize * cellSize);
 
+                    // Draw the global index number at the top-left corner of the grid
+                    textSize(10);
+                    fill(255); // White fill for visibility
+                    stroke(0); // Black outline for contrast
+                    strokeWeight(1);
+                    textAlign(LEFT, TOP);
+                    text(actualIndex, x + 2, roundedY + 2);
+
+                    // Draw special borders
                     if (actualIndex === 1000 || actualIndex === 2000) {
                         console.log(`Drawing red border for index ${actualIndex}`);
                         stroke(255, 0, 0);
@@ -417,7 +654,13 @@
                     stroke(0);
                     strokeWeight(1);
 
-                    if (actualIndex >= 2001 && actualIndex <= 2064) {
+                    const bigGrid = getLocalStorage('bigGrid');
+                    if (bigGrid && actualIndex >= bigGrid.startIndex && actualIndex < bigGrid.startIndex + 64) {
+                        stroke(0, 255, 0);
+                        strokeWeight(2);
+                        noFill();
+                        rect(x - 2, roundedY - 2, gridSize * cellSize + 4, gridSize * cellSize + 4);
+                    } else if (actualIndex >= 2001 && actualIndex <= 2064) {
                         stroke(0, 255, 0);
                         strokeWeight(2);
                         noFill();
@@ -434,6 +677,17 @@
                         rect(x - 2, roundedY - 2, gridSize * cellSize + 4, gridSize * cellSize + 4);
                     }
 
+                    if (actualIndex === leftEditorIndex) {
+                        stroke(255, 165, 0);
+                        strokeWeight(2);
+                        noFill();
+                        rect(x - 2, roundedY - 2, gridSize * cellSize + 4, gridSize * cellSize + 4);
+                    }
+
+                    stroke(0);
+                    strokeWeight(1);
+
+                    // Draw the grid cells
                     for (let row = 0; row < gridSize; row++) {
                         for (let col = 0; col < gridSize; col++) {
                             noStroke();
