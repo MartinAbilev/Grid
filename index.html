@@ -1,52 +1,13 @@
-<script type="text/javascript">
-        var gk_isXlsx = false;
-        var gk_xlsxFileLookup = {};
-        var gk_fileData = {};
-        function filledCell(cell) {
-          return cell !== '' && cell != null;
-        }
-        function loadFileData(filename) {
-        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
-            try {
-                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
-                var firstSheetName = workbook.SheetNames[0];
-                var worksheet = workbook.Sheets[firstSheetName];
-
-                // Convert sheet to JSON to filter blank rows
-                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
-                // Filter out blank rows (rows where all cells are empty, null, or undefined)
-                var filteredData = jsonData.filter(row => row.some(filledCell));
-
-                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
-                var headerRowIndex = filteredData.findIndex((row, index) =>
-                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
-                );
-                // Fallback
-                if (headerRowIndex === -1 || headerRowIndex > 25) {
-                  headerRowIndex = 0;
-                }
-
-                // Convert filtered JSON back to CSV
-                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
-                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
-                return csv;
-            } catch (e) {
-                console.error(e);
-                return "";
-            }
-        }
-        return gk_fileData[filename] || "";
-        }
-        </script><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>8x8 Unique Grid Generator with Meta-Grid Face (Fixed Syntax Error in startSearch)</title>
+    <title>8x8 Unique Grid Generator with Meta-Grid Face (FNV-1a Hashing and Single Pixel Search)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
     <style>
         body { display: flex; flex-direction: column; align-items: center; font-family: Arial, sans-serif; margin: 0; }
         .canvas-container {
-            width: 775px;
+            width: 780px;
             height: 780px;
             overflow: hidden;
             border: 1px solid black;
@@ -63,7 +24,7 @@
     <div class="controls">
         <input type="number" id="seed" min="0" value="42" placeholder="Seed (optional)">
         <button onclick="generateGrids()">Generate Grids</button>
-        <button onclick="startSearch()">Find Heart or Smiley</button>
+        <button onclick="startSearch()">Find Patterns</button>
         <button onclick="stopSearch()">Stop Search</button>
         <button onclick="resetSearch()">Reset Search</button>
         <button onclick="previousGrids()">Previous</button>
@@ -143,6 +104,9 @@
             [0, 0, 1, 1, 1, 1, 0, 0]
         ];
 
+        const singlePixelPattern = Array(8).fill().map(() => Array(8).fill(0));
+        singlePixelPattern[3][3] = 1; // Center pixel at row=3, col=3 (0-based indexing)
+
         function setLocalStorage(name, value) {
             localStorage.setItem(name, value);
         }
@@ -167,9 +131,13 @@
                 for (let row = 0; row < gridSize; row++) {
                     let rowData = [];
                     for (let col = 0; col < gridSize; col++) {
-                        let value = BigInt(index + row * gridSize + col) + BigInt(seed);
-                        value = (value * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn;
-                        let pixel = (value % 100n) < (metaValue === 1 ? 75n : 25n) ? 1 : 0;
+                        let hash = 0xCBF29CE484222325n;
+                        const prime = 0x100000001B3n;
+                        hash ^= BigInt(index); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                        hash ^= BigInt(row); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                        hash ^= BigInt(col); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                        hash ^= BigInt(seed); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                        let pixel = (hash % 100n) < (metaValue === 1 ? 75n : 25n) ? 1 : 0;
                         rowData.push(pixel);
                         if (pixel === 1) blackPixels++;
                     }
@@ -178,15 +146,18 @@
                 return grid;
             }
 
-            let value = BigInt(index) + BigInt(seed);
-            value = (value * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn;
-
             let grid = [];
-            let binary = value.toString(2).padStart(64, '0');
             for (let row = 0; row < gridSize; row++) {
                 let rowData = [];
                 for (let col = 0; col < gridSize; col++) {
-                    rowData.push(parseInt(binary[row * gridSize + col]));
+                    let hash = 0xCBF29CE484222325n;
+                    const prime = 0x100000001B3n;
+                    hash ^= BigInt(index); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                    hash ^= BigInt(row); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                    hash ^= BigInt(col); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                    hash ^= BigInt(seed); hash = (hash * prime) & 0xFFFFFFFFFFFFFFFFn;
+                    let pixel = (hash % 100n) < 50n ? 1 : 0;
+                    rowData.push(pixel);
                 }
                 grid.push(rowData);
             }
@@ -299,7 +270,7 @@
             if (searchInterval || playInterval) return;
             let seed = parseInt(document.getElementById('seed').value) || 42;
             let speed = parseInt(document.getElementById('speed').value) || 50;
-            const searchLimit = Math.pow(2, 32);
+            const searchLimit = Math.pow(2, 24); // Increased to 2^24 = 16,777,216
 
             let firstVisibleIndex = startIndex + Math.floor(scrollOffset / gridHeight) * gridsPerRow;
             if (lastCheckIndex < firstVisibleIndex) {
@@ -323,37 +294,43 @@
 
                 let grid = generatePattern(checkIndex, seed);
 
+                if (gridsMatch(grid, singlePixelPattern)) {
+                    alert(`Single pixel in center found at grid number ${checkIndex}!`);
+                    setLocalStorage("lastCheckIndex", checkIndex);
+                    stopSearch();
+                    return;
+                }
                 if (gridsMatch(grid, heartPattern)) {
                     alert(`Heart symbol found at grid number ${checkIndex}!`);
                     setLocalStorage("lastCheckIndex", checkIndex);
                     stopSearch();
                     return;
                 }
-                // if (gridsMatch(grid, smileyPattern)) {
-                //     alert(`Smiley symbol found at grid number ${checkIndex}!`);
-                //     setLocalStorage("lastCheckIndex", checkIndex);
-                //     stopSearch();
-                //     return;
-                // }
-                // if (gridsMatch(grid, monaLisaPattern)) {
-                //     alert(`Mona Lisa found at grid number ${checkIndex}!`);
-                //     setLocalStorage("lastCheckIndex", checkIndex);
-                //     stopSearch();
-                //     return;
-                // }
-                // if (gridsMatch(grid, facePattern)) {
-                //     alert(`Your face found at grid number ${checkIndex}!`);
-                //     setLocalStorage("lastCheckIndex", checkIndex);
-                //     stopSearch();
-                //     return;
-                // }
+                if (gridsMatch(grid, smileyPattern)) {
+                    alert(`Smiley symbol found at grid number ${checkIndex}!`);
+                    setLocalStorage("lastCheckIndex", checkIndex);
+                    stopSearch();
+                    return;
+                }
+                if (gridsMatch(grid, monaLisaPattern)) {
+                    alert(`Mona Lisa found at grid number ${checkIndex}!`);
+                    setLocalStorage("lastCheckIndex", checkIndex);
+                    stopSearch();
+                    return;
+                }
+                if (gridsMatch(grid, facePattern)) {
+                    alert(`Your face found at grid number ${checkIndex}!`);
+                    setLocalStorage("lastCheckIndex", checkIndex);
+                    stopSearch();
+                    return;
+                }
 
                 checkIndex++;
                 lastCheckIndex = checkIndex;
                 setLocalStorage("lastCheckIndex", checkIndex);
 
                 if (checkIndex > searchLimit) {
-                    alert(`No heart, smiley, Mona Lisa, or face found in the first ${searchLimit} grids with seed ${seed}. Try a different seed!`);
+                    alert(`No patterns found in the first ${searchLimit} grids with seed ${seed}. Try a different seed!`);
                     setLocalStorage("lastCheckIndex", checkIndex);
                     stopSearch();
                     return;
