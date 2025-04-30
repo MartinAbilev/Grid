@@ -1,0 +1,480 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>8x8 Unique Grid Generator with Meta-Grid Face (Fixed Syntax Error in startSearch)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+    <style>
+        body { display: flex; flex-direction: column; align-items: center; font-family: Arial, sans-serif; margin: 0; }
+        .canvas-container {
+            width: 775px;
+            height: 780px;
+            overflow: hidden;
+            border: 1px solid black;
+            margin-top: 10px;
+        }
+        input { margin: 10px; padding: 5px; }
+        button { padding: 5px 10px; margin: 5px; }
+        .small-button { padding: 2px 5px; font-size: 12px; }
+        .controls { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; }
+        .label { margin: 0 10px; }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <input type="number" id="seed" min="0" value="42" placeholder="Seed (optional)">
+        <button onclick="generateGrids()">Generate Grids</button>
+        <button onclick="startSearch()">Find Heart or Smiley</button>
+        <button onclick="stopSearch()">Stop Search</button>
+        <button onclick="resetSearch()">Reset Search</button>
+        <button onclick="previousGrids()">Previous</button>
+        <button class="small-button" onclick="shiftMinusOne()">-1</button>
+        <button class="small-button" onclick="shiftPlusOne()">+1</button>
+        <button onclick="nextGrids()">Next</button>
+        <input type="number" id="speed" min="1" value="50" placeholder="Speed (ms)">
+        <button onclick="playGrids()">Play</button>
+        <button onclick="stopGrids()">Stop</button>
+    </div>
+    <div>
+        <span class="label" id="indexLabel">Showing grids 1 to 64</span>
+    </div>
+    <div class="canvas-container" id="canvasContainer"></div>
+    <script>
+        let grids = [];
+        const cellSize = 10;
+        const gridSize = 8;
+        const spacing = 15;
+        const gridsPerRow = 8;
+        const visibleRows = 8;
+        const bufferRows = 2;
+        const totalRows = visibleRows + bufferRows * 2;
+        const batchSize = totalRows * gridsPerRow; // 12 * 8 = 96 grids
+        let startIndex = 1;
+        let scrollOffset = 0;
+        let playInterval = null;
+        let searchInterval = null;
+        let currentCheckIndex = null;
+        let lastCheckIndex = 1;
+        let borderOpacity = 0;
+        let borderFadeIndex = null;
+        const gridHeight = gridSize * cellSize + spacing; // 95px
+        let alertedIndices = {};
+
+        const heartPattern = [
+            [0, 1, 1, 0, 0, 1, 1, 0],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 1, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0]
+        ];
+
+        const smileyPattern = [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0, 0, 1, 0],
+            [0, 1, 0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0]
+        ];
+
+        const monaLisaPattern = [
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [1, 1, 0, 1, 1, 0, 1, 1],
+            [1, 1, 0, 1, 1, 0, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 0, 1, 1, 0, 1, 1],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0]
+        ];
+
+        const facePattern = [
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 1, 0, 0, 1, 1, 1],
+            [1, 1, 0, 1, 1, 0, 1, 1],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0]
+        ];
+
+        function setLocalStorage(name, value) {
+            localStorage.setItem(name, value);
+        }
+
+        function getLocalStorage(name) {
+            return localStorage.getItem(name);
+        }
+
+        function generatePattern(index, seed) {
+            if (index === 1000) return monaLisaPattern;
+            if (index === 2000) return facePattern;
+
+            if (index >= 2001 && index <= 2064) {
+                let metaIndex = index - 2001;
+                let metaRow = Math.floor(metaIndex / 8);
+                let metaCol = metaIndex % 8;
+                let metaValue = facePattern[metaRow][metaCol];
+
+                let grid = [];
+                let targetBlackPixels = metaValue === 1 ? 48 : 16;
+                let blackPixels = 0;
+                for (let row = 0; row < gridSize; row++) {
+                    let rowData = [];
+                    for (let col = 0; col < gridSize; col++) {
+                        let value = BigInt(index + row * gridSize + col) + BigInt(seed);
+                        value = (value * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn;
+                        let pixel = (value % 100n) < (metaValue === 1 ? 75n : 25n) ? 1 : 0;
+                        rowData.push(pixel);
+                        if (pixel === 1) blackPixels++;
+                    }
+                    grid.push(rowData);
+                }
+                return grid;
+            }
+
+            let value = BigInt(index) + BigInt(seed);
+            value = (value * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn;
+
+            let grid = [];
+            let binary = value.toString(2).padStart(64, '0');
+            for (let row = 0; row < gridSize; row++) {
+                let rowData = [];
+                for (let col = 0; col < gridSize; col++) {
+                    rowData.push(parseInt(binary[row * gridSize + col]));
+                }
+                grid.push(rowData);
+            }
+            return grid;
+        }
+
+        function gridsMatch(grid1, grid2) {
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    if (grid1[row][col] !== grid2[row][col]) return false;
+                }
+            }
+            return true;
+        }
+
+        function setup() {
+            let savedIndex = getLocalStorage("lastCheckIndex");
+            if (savedIndex) {
+                lastCheckIndex = parseInt(savedIndex);
+                startIndex = Math.max(1, Math.floor((lastCheckIndex - 1) / (gridsPerRow * bufferRows)) * (gridsPerRow * bufferRows) + 1);
+                scrollOffset = ((lastCheckIndex - startIndex) / gridsPerRow) * gridHeight;
+            }
+
+            let canvas = createCanvas(780, 780);
+            canvas.parent('canvasContainer');
+            generateGrids();
+        }
+
+        function generateGrids() {
+            let seed = parseInt(document.getElementById('seed').value) || 42;
+            grids = [];
+
+            for (let i = startIndex; i < startIndex + batchSize; i++) {
+                let grid = generatePattern(i, seed);
+                grids.push(grid);
+            }
+
+            currentCheckIndex = null;
+            borderOpacity = 0;
+            borderFadeIndex = null;
+            updateIndexLabel();
+        }
+
+        function updateIndexLabel() {
+            let firstVisibleRow = Math.floor(scrollOffset / gridHeight);
+            let firstVisibleIndex = startIndex + firstVisibleRow * gridsPerRow;
+            let lastVisibleIndex = firstVisibleIndex + (visibleRows * gridsPerRow) - 1;
+            setLocalStorage("lastCheckIndex", firstVisibleIndex);
+
+            document.getElementById('indexLabel').textContent =
+                `Showing grids ${firstVisibleIndex} to ${lastVisibleIndex}`;
+        }
+
+        function nextGrids() {
+            scrollOffset += gridHeight;
+
+            if (scrollOffset >= gridHeight * bufferRows) {
+                startIndex += gridsPerRow * bufferRows;
+                scrollOffset -= gridHeight * bufferRows;
+                generateGrids();
+            }
+            updateIndexLabel();
+        }
+
+        function previousGrids() {
+            scrollOffset -= gridHeight;
+
+            if (scrollOffset < 0) {
+                startIndex = Math.max(1, startIndex - gridsPerRow * bufferRows);
+                scrollOffset += gridHeight * bufferRows;
+                if (startIndex === 1) scrollOffset = 0;
+                generateGrids();
+            }
+            updateIndexLabel();
+        }
+
+        function shiftMinusOne() {
+            startIndex = Math.max(1, startIndex - 1);
+            generateGrids();
+            updateIndexLabel();
+        }
+
+        function shiftPlusOne() {
+            startIndex += 1;
+            generateGrids();
+            updateIndexLabel();
+        }
+
+        function mouseWheel(event) {
+            scrollOffset += event.delta > 0 ? gridHeight : -gridHeight;
+            scrollOffset = Math.max(0, Math.min(scrollOffset, gridHeight * (totalRows - visibleRows)));
+            updateIndexLabel();
+            return false;
+        }
+
+        function playGrids() {
+            if (playInterval || searchInterval) return;
+            let speed = parseInt(document.getElementById('speed').value) || 50;
+            playInterval = setInterval(nextGrids, speed);
+        }
+
+        function stopGrids() {
+            if (playInterval) {
+                clearInterval(playInterval);
+                playInterval = null;
+            }
+        }
+
+        function startSearch() {
+            if (searchInterval || playInterval) return;
+            let seed = parseInt(document.getElementById('seed').value) || 42;
+            let speed = parseInt(document.getElementById('speed').value) || 50;
+            const searchLimit = Math.pow(2, 32);
+
+            let firstVisibleIndex = startIndex + Math.floor(scrollOffset / gridHeight) * gridsPerRow;
+            if (lastCheckIndex < firstVisibleIndex) {
+                lastCheckIndex = firstVisibleIndex;
+                setLocalStorage("lastCheckIndex", lastCheckIndex);
+            }
+
+            let checkIndex = lastCheckIndex;
+
+            if (checkIndex < startIndex || checkIndex >= startIndex + batchSize) {
+                startIndex = Math.max(1, Math.floor((checkIndex - 1) / (gridsPerRow * bufferRows)) * (gridsPerRow * bufferRows) + 1);
+                scrollOffset = ((checkIndex - startIndex) / gridsPerRow) * gridHeight;
+                generateGrids();
+            }
+
+            console.log("Starting search with checkIndex:", checkIndex);
+            searchInterval = setInterval(() => {
+                currentCheckIndex = checkIndex;
+                borderOpacity = 0.3;
+                borderFadeIndex = checkIndex;
+
+                let grid = generatePattern(checkIndex, seed);
+
+                if (gridsMatch(grid, heartPattern)) {
+                    alert(`Heart symbol found at grid number ${checkIndex}!`);
+                    setLocalStorage("lastCheckIndex", checkIndex);
+                    stopSearch();
+                    return;
+                }
+                // if (gridsMatch(grid, smileyPattern)) {
+                //     alert(`Smiley symbol found at grid number ${checkIndex}!`);
+                //     setLocalStorage("lastCheckIndex", checkIndex);
+                //     stopSearch();
+                //     return;
+                // }
+                // if (gridsMatch(grid, monaLisaPattern)) {
+                //     alert(`Mona Lisa found at grid number ${checkIndex}!`);
+                //     setLocalStorage("lastCheckIndex", checkIndex);
+                //     stopSearch();
+                //     return;
+                // }
+                // if (gridsMatch(grid, facePattern)) {
+                //     alert(`Your face found at grid number ${checkIndex}!`);
+                //     setLocalStorage("lastCheckIndex", checkIndex);
+                //     stopSearch();
+                //     return;
+                // }
+
+                checkIndex++;
+                lastCheckIndex = checkIndex;
+                setLocalStorage("lastCheckIndex", checkIndex);
+
+                if (checkIndex > searchLimit) {
+                    alert(`No heart, smiley, Mona Lisa, or face found in the first ${searchLimit} grids with seed ${seed}. Try a different seed!`);
+                    setLocalStorage("lastCheckIndex", checkIndex);
+                    stopSearch();
+                    return;
+                }
+
+                let checkRow = Math.floor((checkIndex - startIndex) / gridsPerRow);
+                let firstVisibleRow = Math.floor(scrollOffset / gridHeight);
+                let lastVisibleRow = firstVisibleRow + visibleRows - 1;
+
+                if (checkRow > lastVisibleRow) {
+                    scrollOffset += gridHeight;
+                    if (scrollOffset >= gridHeight * bufferRows) {
+                        startIndex += gridsPerRow * bufferRows;
+                        scrollOffset -= gridHeight * bufferRows;
+                        generateGrids();
+                    }
+                } else if (checkRow < firstVisibleRow) {
+                    scrollOffset -= gridHeight;
+                    if (scrollOffset < 0) {
+                        startIndex = Math.max(1, startIndex - gridsPerRow * bufferRows);
+                        scrollOffset += gridHeight * bufferRows;
+                        if (startIndex === 1) scrollOffset = 0;
+                        generateGrids();
+                    }
+                }
+
+                updateIndexLabel();
+            }, speed);
+        }
+
+        function stopSearch() {
+            if (searchInterval) {
+                clearInterval(searchInterval);
+                searchInterval = null;
+                currentCheckIndex = null;
+                console.log("Search stopped");
+            }
+        }
+
+        function resetSearch() {
+            lastCheckIndex = 1;
+            startIndex = 1;
+            scrollOffset = 0;
+            setLocalStorage("lastCheckIndex", lastCheckIndex);
+            generateGrids();
+            alertedIndices = {};
+        }
+
+        function draw() {
+            background(255);
+            let x = spacing;
+            let y = spacing - scrollOffset;
+            let gridIndex = 0;
+
+            if (borderOpacity > 0) {
+                borderOpacity -= 0.001 * deltaTime;
+                if (borderOpacity < 0) borderOpacity = 0;
+            }
+
+            for (let i = 0; i < grids.length; i++) {
+                let grid = grids[i];
+                let actualIndex = startIndex + i;
+
+                let roundedY = Math.round(y);
+                if (roundedY + gridSize * cellSize >= 0 && roundedY < 780) {
+                    stroke(0);
+                    strokeWeight(1);
+                    noFill();
+                    rect(x, roundedY, gridSize * cellSize, gridSize * cellSize);
+
+                    if (actualIndex === 1000 || actualIndex === 2000) {
+                        console.log(`Drawing red border for index ${actualIndex}`);
+                        stroke(255, 0, 0);
+                        strokeWeight(2);
+                        noFill();
+                        rect(x - 2, roundedY - 2, gridSize * cellSize + 4, gridSize * cellSize + 4);
+                        if (!alertedIndices[actualIndex]) {
+                            alert(`Reached index ${actualIndex}!`);
+                            alertedIndices[actualIndex] = true;
+                        }
+                    }
+
+                    stroke(0);
+                    strokeWeight(1);
+
+                    if (actualIndex >= 2001 && actualIndex <= 2064) {
+                        stroke(0, 255, 0);
+                        strokeWeight(2);
+                        noFill();
+                        rect(x - 2, roundedY - 2, gridSize * cellSize + 4, gridSize * cellSize + 4);
+                    }
+
+                    stroke(0);
+                    strokeWeight(1);
+
+                    if (actualIndex === currentCheckIndex || (actualIndex === borderFadeIndex && borderOpacity > 0)) {
+                        stroke(135, 206, 250, borderOpacity * 255);
+                        strokeWeight(2);
+                        noFill();
+                        rect(x - 2, roundedY - 2, gridSize * cellSize + 4, gridSize * cellSize + 4);
+                    }
+
+                    for (let row = 0; row < gridSize; row++) {
+                        for (let col = 0; col < gridSize; col++) {
+                            noStroke();
+                            fill(grid[row][col] ? 0 : 255);
+                            let cellX = Math.round(x + col * cellSize);
+                            let cellY = Math.round(roundedY + row * cellSize);
+                            square(cellX, cellY, cellSize);
+                        }
+                    }
+                }
+
+                x += gridSize * cellSize + spacing;
+                gridIndex++;
+                if (gridIndex % gridsPerRow === 0) {
+                    x = spacing;
+                    y += gridSize * cellSize + spacing;
+                }
+            }
+        }
+    </script>
+</body>
+</html>
