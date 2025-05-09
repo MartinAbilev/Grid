@@ -77,6 +77,7 @@
         let leftEditorGrid;
         let rightEditorGrid;
         let leftEditorIndex = null;
+        let leftEditorInstance = null; // To store the left editor p5 instance
 
         const heartPattern = [
             [0, 1, 1, 0, 0, 1, 1, 0],
@@ -333,13 +334,14 @@
                 pattern: patternToUse
             });
 
-            // Regenerate grids to reflect the new big grid, preserving scrollOffset and leftEditorIndex
+            // Preserve the current state
             const currentScrollOffset = scrollOffset;
             const currentLeftEditorIndex = leftEditorIndex;
 
+            // Regenerate grids to apply the big grid
             generateGrids();
 
-            // Restore scrollOffset and leftEditorIndex
+            // Restore the state
             scrollOffset = currentScrollOffset;
             leftEditorIndex = currentLeftEditorIndex;
             setLocalStorage('leftEditorIndex', leftEditorIndex);
@@ -361,7 +363,7 @@
             leftEditorIndex = getLocalStorage('leftEditorIndex') || null;
 
             // Setup editors
-            new p5(leftEditorSketch);
+            leftEditorInstance = new p5(leftEditorSketch);
             new p5(rightEditorSketch);
 
             // Setup main canvas
@@ -466,6 +468,11 @@
                 // Save to localStorage
                 setLocalStorage('leftEditorGrid', leftEditorGrid);
                 setLocalStorage('leftEditorIndex', leftEditorIndex);
+
+                // Force the left editor to redraw with the updated grid
+                if (leftEditorInstance) {
+                    leftEditorInstance.drawGrid();
+                }
             }
         }
 
@@ -677,7 +684,8 @@
                         rect(x - 2, roundedY - 2, gridSize * cellSize + 4, gridSize * cellSize + 4);
                     }
 
-                    if (actualIndex === leftEditorIndex) {
+                    // Only draw the orange border if the actualIndex exactly matches leftEditorIndex
+                    if (leftEditorIndex !== null && actualIndex === leftEditorIndex) {
                         stroke(255, 165, 0);
                         strokeWeight(2);
                         noFill();
